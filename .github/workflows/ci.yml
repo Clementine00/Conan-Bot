@@ -72,9 +72,13 @@ jobs:
         run: bash scripts/check_secrets.sh
 
       - name: Install gitleaks
+        env:
+          # Authenticated so the lookup isn't subject to the low anonymous
+          # API rate limit shared across hosted runners.
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-            | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
+          TAG=$(curl -fsSL -H "Authorization: Bearer $GH_API_TOKEN" https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
+          if [ -z "$TAG" ]; then echo "Could not resolve gitleaks release"; exit 1; fi
           echo "Using gitleaks $TAG"
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/${TAG}/gitleaks_${TAG#v}_linux_x64.tar.gz" \
             | tar -xz gitleaks
