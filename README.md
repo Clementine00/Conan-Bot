@@ -159,3 +159,7 @@ are outbound-only, so this works fine on a home network behind NAT.
 Reset it immediately in the Discord Developer Portal (**Bot → Reset Token**). Rotating
 the token invalidates the old one; removing it from git history alone is not enough,
 because the value may already have been copied.
+
+## License
+
+[MIT](LICENSE)
