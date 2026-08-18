@@ -169,6 +169,22 @@ is either a 403 or "Requested format is not available".
 `bgutil-provider` sidecar that mints those tokens. The bot finds it via
 `POT_PROVIDER_URL`, which compose sets to `http://bgutil-provider:4416`.
 
+A token alone is not enough - the player client has to be one that actually
+requests it. yt-dlp's default, `android_vr`, never asks for a token, so it wins
+client selection and hands back URLs that 403. `web_safari` and `tv` are
+SABR-only and yt-dlp has no SABR downloader. `mweb` requests a GVS token and
+still serves plain HTTPS formats, so the bot pins it via `YOUTUBE_PLAYER_CLIENT`.
+
+If YouTube shifts again, try other clients without rebuilding by setting that
+variable (comma-separated, tried in order) on the `bot` service in
+`docker-compose.yml`, then `docker compose up -d`. To find one that works:
+
+```bash
+for C in mweb ios tv web_safari android_vr; do printf "%-12s " "$C"; docker compose exec -T bot yt-dlp --js-runtimes node --remote-components ejs:github --extractor-args "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416" --extractor-args "youtube:player_client=$C" -f bestaudio -o - "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>/dev/null | head -c 300000 | wc -c; done
+```
+
+A large byte count means that client works; `0` means it does not.
+
 Check the provider is up and reachable from the bot:
 
 ```bash

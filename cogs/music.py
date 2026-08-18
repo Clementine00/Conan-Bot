@@ -15,6 +15,14 @@ from discord.ext import commands
 # that is a sidecar container, so the URL is overridable per environment.
 POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "http://127.0.0.1:4416")
 
+# Which YouTube player client to extract with. The default, android_vr, never
+# requests a PO token, so YouTube answers its stream URLs with 403. web_safari
+# and tv are SABR-only and yt-dlp has no SABR downloader. mweb requests a GVS
+# token from the provider above and still serves plain HTTPS formats.
+# Overridable because YouTube changes which clients work fairly often.
+YOUTUBE_PLAYER_CLIENT = os.getenv("YOUTUBE_PLAYER_CLIENT", "mweb")
+_PLAYER_CLIENTS = [c.strip() for c in YOUTUBE_PLAYER_CLIENT.split(",") if c.strip()]
+
 YDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -29,6 +37,7 @@ YDL_OPTIONS = {
     "js_runtimes": {"node": {}},
     "remote_components": ["ejs:github"],
     "extractor_args": {
+        "youtube": {"player_client": _PLAYER_CLIENTS},
         "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
     },
 }
