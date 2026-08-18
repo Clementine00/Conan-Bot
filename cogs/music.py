@@ -1,6 +1,7 @@
 import asyncio
 import random
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, field
 
 import discord
 import yt_dlp
@@ -22,10 +23,22 @@ YDL_OPTIONS = {
     "remote_components": ["ejs:github"],
 }
 
-FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
+FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+
+
+def ffmpeg_options(headers: dict[str, str]) -> dict[str, str]:
+    """Build FFmpeg arguments, forwarding the headers yt-dlp extracted with.
+
+    FFmpeg fetches the stream URL itself rather than reusing yt-dlp's session,
+    so by default it sends its own Lavf/ User-Agent. Google can refuse a URL
+    fetched with headers that don't match the client it was issued to, which
+    surfaces as HTTP 403 at playback time.
+    """
+    before = FFMPEG_BEFORE_OPTIONS
+    if headers:
+        blob = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+        before = f"{before} -headers {shlex.quote(blob)}"
+    return {"before_options": before, "options": "-vn"}
 
 
 @dataclass
@@ -36,6 +49,7 @@ class Song:
     duration: int
     requester: discord.Member
     url: str = ""  # stream URL, resolved at play time
+    http_headers: dict[str, str] = field(default_factory=dict)
 
 
 class Music(commands.Cog):
@@ -69,8 +83,12 @@ class Music(commands.Cog):
             requester=requester,
         )
 
-    async def resolve_stream_url(self, song: Song) -> str:
-        """Resolve the direct stream URL right before playback (URLs expire)."""
+    async def resolve_stream_url(self, song: Song) -> tuple[str, dict[str, str]]:
+        """Resolve the direct stream URL and its headers just before playback.
+
+        Stream URLs are short-lived, so this runs immediately before handing
+        the URL to FFmpeg rather than at queue time.
+        """
         loop = asyncio.get_event_loop()
 
         def _extract():
@@ -78,7 +96,7 @@ class Music(commands.Cog):
                 info = ydl.extract_info(song.webpage_url, download=False)
                 if "entries" in info:
                     info = info["entries"][0]
-                return info["url"]
+                return info["url"], info.get("http_headers") or {}
 
         return await loop.run_in_executor(None, _extract)
 
@@ -111,13 +129,13 @@ class Music(commands.Cog):
     ):
         """Resolve the stream URL and start playback."""
         try:
-            song.url = await self.resolve_stream_url(song)
+            song.url, song.http_headers = await self.resolve_stream_url(song)
         except Exception as e:
             await channel.send(f"Could not play **{song.title}**: {e}")
             self.play_next(guild, channel)
             return
 
-        source = discord.FFmpegPCMAudio(song.url, **FFMPEG_OPTIONS)
+        source = discord.FFmpegPCMAudio(song.url, **ffmpeg_options(song.http_headers))
         self.now_playing[guild.id] = song
 
         voice_client.play(
@@ -172,12 +190,12 @@ class Music(commands.Cog):
         else:
             # Nothing is playing — start immediately
             try:
-                song.url = await self.resolve_stream_url(song)
+                song.url, song.http_headers = await self.resolve_stream_url(song)
             except Exception as e:
                 await interaction.followup.send(f"Could not play **{song.title}**: {e}")
                 return
 
-            source = discord.FFmpegPCMAudio(song.url, **FFMPEG_OPTIONS)
+            source = discord.FFmpegPCMAudio(song.url, **ffmpeg_options(song.http_headers))
             self.now_playing[interaction.guild.id] = song
 
             voice_client.play(
