@@ -91,45 +91,68 @@ On pushes to `main`, and only if all three of the above pass:
 
 ## Deployment
 
-The bot ships as a Docker image. On the Ubuntu host:
+CI builds the image from this repo and pushes it to GHCR. The server never clones
+the repo and never builds anything — it only pulls the finished image, and only
+when you tell it to. Nothing deploys automatically.
+
+### One-time server setup
 
 ```bash
 mkdir -p ~/conan-bot && cd ~/conan-bot
-# copy docker-compose.yml from this repo into that directory
+```
+
+Copy `docker-compose.yml` and `scripts/update.sh` from this repo into that directory,
+then create the environment file:
+
+```bash
 nano .env          # DISCORD_TOKEN=... and optionally GUILD_ID=...
 chmod 600 .env
+```
 
-# GHCR is private, so authenticate once with a PAT that has read:packages
+The package is private because the repo is, so authenticate to GHCR once. Use a
+personal access token with only the `read:packages` scope — Docker stores the
+credentials in `~/.docker/config.json` and reuses them from then on:
+
+```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u Clementine00 --password-stdin
+```
 
-docker compose pull
+Then start it:
+
+```bash
 docker compose up -d
 docker compose logs -f
 ```
 
-### Automatic deploys
+### Updating
 
-The `deploy` job stays skipped until you opt in. To enable it, under
-**Settings → Secrets and variables → Actions**:
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Variable | `DEPLOY_ENABLED` | `true` |
-| Secret | `DEPLOY_HOST` | Server hostname or IP |
-| Secret | `DEPLOY_USER` | SSH user |
-| Secret | `DEPLOY_SSH_KEY` | Private half of a deploy-only SSH keypair |
-| Secret | `DEPLOY_PATH` | Directory holding `docker-compose.yml`, e.g. `/home/you/conan-bot` |
-| Secret | `GHCR_PULL_TOKEN` | PAT with `read:packages`, used by the host to pull |
-
-Generate a dedicated keypair rather than reusing a personal one, and put only its
-public half in the server's `~/.ssh/authorized_keys`:
+Whenever you want the latest build, SSH in and run:
 
 ```bash
-ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./deploy_key -N ""
+cd ~/conan-bot && ./update.sh
 ```
 
+That pulls the newest image, recreates the container only if the image actually
+changed, and prunes the old layer. Equivalent by hand:
+
+```bash
+docker compose pull && docker compose up -d && docker image prune -f
+```
+
+To pin a specific build instead of tracking `latest`, every commit is also tagged
+with its short SHA:
+
+```bash
+BOT_IMAGE=ghcr.io/clementine00/conan-bot:sha-1a2b3c4 docker compose up -d
+```
+
+### Notes
+
 The `.env` on the server is the only place the bot token lives. It is never baked
-into the image and never passed through Actions.
+into the image, never committed, and never passes through Actions.
+
+No inbound ports are needed. Both the image pull and the bot's Discord connection
+are outbound-only, so this works fine on a home network behind NAT.
 
 ## If the token ever leaks
 
