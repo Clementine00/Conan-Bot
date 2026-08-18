@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import shlex
 from dataclasses import dataclass, field
@@ -7,6 +8,12 @@ import discord
 import yt_dlp
 from discord import app_commands
 from discord.ext import commands
+
+# YouTube requires a GVS proof-of-origin token for playable formats. Without one
+# the android_vr client returns URLs that answer 403 and every other client
+# returns no formats at all. Tokens come from a bgutil provider; in deployment
+# that is a sidecar container, so the URL is overridable per environment.
+POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "http://127.0.0.1:4416")
 
 YDL_OPTIONS = {
     "format": "bestaudio/best",
@@ -21,6 +28,9 @@ YDL_OPTIONS = {
     # dropped and those tracks fail to play.
     "js_runtimes": {"node": {}},
     "remote_components": ["ejs:github"],
+    "extractor_args": {
+        "youtubepot-bgutilhttp": {"base_url": [POT_PROVIDER_URL]},
+    },
 }
 
 FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"

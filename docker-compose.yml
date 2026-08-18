@@ -2,10 +2,25 @@
 # Place this next to a .env holding DISCORD_TOKEN (and optionally GUILD_ID),
 # then: docker compose pull && docker compose up -d
 services:
+  # YouTube requires a proof-of-origin token to hand out playable stream URLs.
+  # This sidecar mints them; the bot reaches it over the compose network only,
+  # so no port is published to the host.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil-provider
+    restart: unless-stopped
+    init: true
+    expose:
+      - "4416"
+
   bot:
     image: ${BOT_IMAGE:-ghcr.io/clementine00/conan-bot:latest}
     container_name: discord-music-bot
     restart: unless-stopped
+    depends_on:
+      - bgutil-provider
+    environment:
+      POT_PROVIDER_URL: http://bgutil-provider:4416
     env_file:
       - .env
     logging:

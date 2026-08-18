@@ -156,6 +156,43 @@ into the image, never committed, and never passes through Actions.
 No inbound ports are needed. Both the image pull and the bot's Discord connection
 are outbound-only, so this works fine on a home network behind NAT.
 
+## Troubleshooting playback
+
+### HTTP 403 on every song
+
+YouTube requires a **GVS proof-of-origin (PO) token** to hand out usable stream
+URLs. Without one, yt-dlp's `android_vr` client still returns URLs but they answer
+`403 Forbidden`, and every other client returns no formats at all - so the symptom
+is either a 403 or "Requested format is not available".
+
+`docker compose up -d` therefore starts two containers: the bot, and a
+`bgutil-provider` sidecar that mints those tokens. The bot finds it via
+`POT_PROVIDER_URL`, which compose sets to `http://bgutil-provider:4416`.
+
+Check the provider is up and reachable from the bot:
+
+```bash
+docker compose ps
+docker compose exec bot python -c "import urllib.request; print(urllib.request.urlopen('http://bgutil-provider:4416/ping', timeout=5).status)"
+```
+
+Confirm yt-dlp actually loaded the plugin - look for `bgutil:http` in the list:
+
+```bash
+docker compose exec bot yt-dlp -v -f bestaudio -g "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 | grep "PO Token Providers"
+```
+
+Note that the provider's own README cautions that a PO token *may* help rather than
+guaranteeing success - YouTube also rate-limits by IP, and a flagged address can
+still be refused.
+
+### No supported JavaScript runtime
+
+yt-dlp runs YouTube's challenge solver on Node and enforces a minimum version
+(22 as of yt-dlp 2026.07.04). The image pins Node 24 and asserts this at build
+time, so this should only appear if you run the bot outside Docker with an older
+Node on your `PATH`.
+
 ## If the token ever leaks
 
 Reset it immediately in the Discord Developer Portal (**Bot → Reset Token**). Rotating
