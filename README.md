@@ -71,19 +71,68 @@ Check that no credentials have crept into tracked files:
 bash scripts/check_secrets.sh
 ```
 
-## CI
+## CI/CD
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request
-to `main`:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) is a single gated pipeline.
+
+On every push and pull request to `main`:
 
 - **Lint** — `ruff check` and `ruff format --check`
-- **Build** — installs dependencies on Python 3.11 and 3.12, byte-compiles the sources,
-  and imports the music cog as a smoke test
+- **Build** — installs dependencies on Python 3.11 and 3.12, byte-compiles the
+  sources, and imports the music cog as a smoke test
 - **Secret scan** — `scripts/check_secrets.sh` plus [gitleaks](https://github.com/gitleaks/gitleaks)
   over both the working tree and the full commit history
 
+On pushes to `main`, and only if all three of the above pass:
+
+- **Publish** — builds the image and pushes it to
+  `ghcr.io/clementine00/conan-bot`, tagged `latest` and with the short commit SHA
+- **Deploy** — SSHes into the Ubuntu host and restarts the container on the new image
+
+## Deployment
+
+The bot ships as a Docker image. On the Ubuntu host:
+
+```bash
+mkdir -p ~/conan-bot && cd ~/conan-bot
+# copy docker-compose.yml from this repo into that directory
+nano .env          # DISCORD_TOKEN=... and optionally GUILD_ID=...
+chmod 600 .env
+
+# GHCR is private, so authenticate once with a PAT that has read:packages
+echo "$GHCR_TOKEN" | docker login ghcr.io -u Clementine00 --password-stdin
+
+docker compose pull
+docker compose up -d
+docker compose logs -f
+```
+
+### Automatic deploys
+
+The `deploy` job stays skipped until you opt in. To enable it, under
+**Settings → Secrets and variables → Actions**:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Variable | `DEPLOY_ENABLED` | `true` |
+| Secret | `DEPLOY_HOST` | Server hostname or IP |
+| Secret | `DEPLOY_USER` | SSH user |
+| Secret | `DEPLOY_SSH_KEY` | Private half of a deploy-only SSH keypair |
+| Secret | `DEPLOY_PATH` | Directory holding `docker-compose.yml`, e.g. `/home/you/conan-bot` |
+| Secret | `GHCR_PULL_TOKEN` | PAT with `read:packages`, used by the host to pull |
+
+Generate a dedicated keypair rather than reusing a personal one, and put only its
+public half in the server's `~/.ssh/authorized_keys`:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./deploy_key -N ""
+```
+
+The `.env` on the server is the only place the bot token lives. It is never baked
+into the image and never passed through Actions.
+
 ## If the token ever leaks
 
-Reset it immediately in the Discord Developer Portal (**Bot → Reset Token**). Rotating the
-token invalidates the old one; removing it from git history alone is not enough, because
-the value may already have been copied.
+Reset it immediately in the Discord Developer Portal (**Bot → Reset Token**). Rotating
+the token invalidates the old one; removing it from git history alone is not enough,
+because the value may already have been copied.

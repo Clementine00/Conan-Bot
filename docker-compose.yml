@@ -1,0 +1,15 @@
+# Deployment compose file for the Ubuntu host.
+# Place this next to a .env holding DISCORD_TOKEN (and optionally GUILD_ID),
+# then: docker compose pull && docker compose up -d
+services:
+  bot:
+    image: ${BOT_IMAGE:-ghcr.io/clementine00/conan-bot:latest}
+    container_name: discord-music-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
