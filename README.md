@@ -22,7 +22,9 @@ channel with a per-guild queue.
 
 - Python 3.11+
 - [FFmpeg](https://ffmpeg.org/) on your `PATH`
-- [Node.js](https://nodejs.org/) — yt-dlp runs YouTube's JS challenge solver through it
+- [Node.js](https://nodejs.org/) **20+ locally, 22+ to match the container** — yt-dlp runs
+  YouTube's JS challenge solver through it and rejects older runtimes, which makes
+  playback fail with HTTP 403
 
 ## Setup
 

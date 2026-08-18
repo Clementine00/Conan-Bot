@@ -1,10 +1,20 @@
 FROM python:3.12-slim
 
-# ffmpeg decodes the audio stream; nodejs runs yt-dlp's YouTube JS challenge
-# solver (see YDL_OPTIONS in cogs/music.py) — without it some formats drop out.
+# ffmpeg decodes the audio stream. libstdc++6 is the only shared library the
+# Node binary copied in below needs beyond the base image.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg nodejs ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp runs YouTube's JS challenge solver (see YDL_OPTIONS in cogs/music.py).
+# As of yt-dlp 2026.07.04 NodeJsRuntime.MIN_SUPPORTED_VERSION is (22, 0, 0),
+# but Debian trixie only packages Node 20.19. yt-dlp then treats the runtime as
+# unsupported, falls back to JS-less clients, and playback dies with HTTP 403 on
+# the returned stream URLs. Pin a new enough Node instead of the distro package.
+COPY --from=node:24-trixie-slim /usr/local/bin/node /usr/local/bin/node
+
+# Fail the build rather than playback if yt-dlp raises the floor again.
+RUN node --version && node -e "if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('yt-dlp requires Node >= 22')"
 
 WORKDIR /app
 
