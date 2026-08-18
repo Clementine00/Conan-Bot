@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# PLAN.md is prose with illustrative snippets, not source we want reformatted.
+exclude = ["venv", ".venv", "__pycache__", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
