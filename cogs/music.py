@@ -1,8 +1,9 @@
 import asyncio
 import os
 import random
-import shlex
-from dataclasses import dataclass, field
+import subprocess
+import sys
+from dataclasses import dataclass
 
 import discord
 import yt_dlp
@@ -42,22 +43,36 @@ YDL_OPTIONS = {
     },
 }
 
-FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 
+def ytdlp_stream_argv(webpage_url: str) -> list[str]:
+    """Command line that streams the chosen audio track to stdout.
 
-def ffmpeg_options(headers: dict[str, str]) -> dict[str, str]:
-    """Build FFmpeg arguments, forwarding the headers yt-dlp extracted with.
-
-    FFmpeg fetches the stream URL itself rather than reusing yt-dlp's session,
-    so by default it sends its own Lavf/ User-Agent. Google can refuse a URL
-    fetched with headers that don't match the client it was issued to, which
-    surfaces as HTTP 403 at playback time.
+    Playback pipes through yt-dlp rather than handing FFmpeg the stream URL.
+    YouTube ties a URL to the session that extracted it, so a second fetch of
+    that same URL is answered with 403 no matter which headers accompany it -
+    only the extracting process can read it.
     """
-    before = FFMPEG_BEFORE_OPTIONS
-    if headers:
-        blob = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
-        before = f"{before} -headers {shlex.quote(blob)}"
-    return {"before_options": before, "options": "-vn"}
+    return [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--quiet",
+        "--no-warnings",
+        "--no-playlist",
+        "--format",
+        YDL_OPTIONS["format"],
+        "--js-runtimes",
+        "node",
+        "--remote-components",
+        "ejs:github",
+        "--extractor-args",
+        f"youtube:player_client={','.join(_PLAYER_CLIENTS)}",
+        "--extractor-args",
+        f"youtubepot-bgutilhttp:base_url={POT_PROVIDER_URL}",
+        "--output",
+        "-",
+        webpage_url,
+    ]
 
 
 @dataclass
@@ -67,8 +82,6 @@ class Song:
     query: str
     duration: int
     requester: discord.Member
-    url: str = ""  # stream URL, resolved at play time
-    http_headers: dict[str, str] = field(default_factory=dict)
 
 
 class Music(commands.Cog):
@@ -76,6 +89,9 @@ class Music(commands.Cog):
         self.bot = bot
         self.queues: dict[int, list[Song]] = {}
         self.now_playing: dict[int, Song | None] = {}
+        # The yt-dlp process feeding each guild's player, so it can be reaped
+        # when playback is skipped, stopped, or replaced.
+        self.streams: dict[int, subprocess.Popen] = {}
 
     def get_queue(self, guild_id: int) -> list[Song]:
         if guild_id not in self.queues:
@@ -102,22 +118,28 @@ class Music(commands.Cog):
             requester=requester,
         )
 
-    async def resolve_stream_url(self, song: Song) -> tuple[str, dict[str, str]]:
-        """Resolve the direct stream URL and its headers just before playback.
+    def stop_stream(self, guild_id: int) -> None:
+        """Reap the yt-dlp process still feeding this guild, if any."""
+        proc = self.streams.pop(guild_id, None)
+        if proc and proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
-        Stream URLs are short-lived, so this runs immediately before handing
-        the URL to FFmpeg rather than at queue time.
-        """
+    async def open_stream(self, song: Song) -> subprocess.Popen:
+        """Start yt-dlp writing this song's audio to a pipe."""
         loop = asyncio.get_event_loop()
 
-        def _extract():
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(song.webpage_url, download=False)
-                if "entries" in info:
-                    info = info["entries"][0]
-                return info["url"], info.get("http_headers") or {}
+        def _spawn():
+            return subprocess.Popen(
+                ytdlp_stream_argv(song.webpage_url),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
 
-        return await loop.run_in_executor(None, _extract)
+        return await loop.run_in_executor(None, _spawn)
 
     def play_next(self, guild: discord.Guild, channel: discord.abc.Messageable):
         """Callback to play the next song in the queue."""
@@ -126,6 +148,7 @@ class Music(commands.Cog):
 
         if not queue or not voice_client:
             self.now_playing[guild.id] = None
+            self.stop_stream(guild.id)
             return
 
         next_song = queue.pop(0)
@@ -147,14 +170,16 @@ class Music(commands.Cog):
         voice_client: discord.VoiceClient,
     ):
         """Resolve the stream URL and start playback."""
+        self.stop_stream(guild.id)
         try:
-            song.url, song.http_headers = await self.resolve_stream_url(song)
+            proc = await self.open_stream(song)
         except Exception as e:
             await channel.send(f"Could not play **{song.title}**: {e}")
             self.play_next(guild, channel)
             return
 
-        source = discord.FFmpegPCMAudio(song.url, **ffmpeg_options(song.http_headers))
+        self.streams[guild.id] = proc
+        source = discord.FFmpegPCMAudio(proc.stdout, pipe=True, options="-vn")
         self.now_playing[guild.id] = song
 
         voice_client.play(
@@ -208,13 +233,15 @@ class Music(commands.Cog):
             )
         else:
             # Nothing is playing — start immediately
+            self.stop_stream(interaction.guild.id)
             try:
-                song.url, song.http_headers = await self.resolve_stream_url(song)
+                proc = await self.open_stream(song)
             except Exception as e:
                 await interaction.followup.send(f"Could not play **{song.title}**: {e}")
                 return
 
-            source = discord.FFmpegPCMAudio(song.url, **ffmpeg_options(song.http_headers))
+            self.streams[interaction.guild.id] = proc
+            source = discord.FFmpegPCMAudio(proc.stdout, pipe=True, options="-vn")
             self.now_playing[interaction.guild.id] = song
 
             voice_client.play(
@@ -263,6 +290,7 @@ class Music(commands.Cog):
         self.queues[interaction.guild.id] = []
         self.now_playing[interaction.guild.id] = None
         voice_client.stop()
+        self.stop_stream(interaction.guild.id)
         await voice_client.disconnect()
         await interaction.response.send_message("Stopped and disconnected.")
 

@@ -185,6 +185,15 @@ for C in mweb ios tv web_safari android_vr; do printf "%-12s " "$C"; docker comp
 
 A large byte count means that client works; `0` means it does not.
 
+### Why playback pipes through yt-dlp
+
+YouTube ties a stream URL to the session that extracted it. Handing that URL to
+FFmpeg - the usual approach - is answered with `403` regardless of which headers
+accompany it; a plain `GET` of the same URL from the same container fails too,
+while yt-dlp's own downloader succeeds. So the bot spawns yt-dlp per track and
+pipes its stdout into FFmpeg rather than passing a URL. `Music.stop_stream`
+reaps that process when a track is skipped, stopped, or replaced.
+
 Check the provider is up and reachable from the bot:
 
 ```bash
