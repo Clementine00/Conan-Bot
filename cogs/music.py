@@ -44,6 +44,13 @@ YDL_OPTIONS = {
 }
 
 
+# Opus in WebM is streamable from a pipe. A muxed MP4 fallback is not: its moov
+# atom sits at the end of the file, so FFmpeg cannot identify the stream until
+# the whole download lands and fails with "Invalid data found when processing
+# input". Prefer audio-only formats and only fall back to a muxed one last.
+STREAM_FORMAT = "bestaudio[acodec=opus]/bestaudio/best"
+
+
 def ytdlp_stream_argv(webpage_url: str) -> list[str]:
     """Command line that streams the chosen audio track to stdout.
 
@@ -56,11 +63,12 @@ def ytdlp_stream_argv(webpage_url: str) -> list[str]:
         sys.executable,
         "-m",
         "yt_dlp",
+        # --quiet drops the progress meter, which would otherwise flood the
+        # container logs, but leaves warnings and errors on stderr.
         "--quiet",
-        "--no-warnings",
         "--no-playlist",
         "--format",
-        YDL_OPTIONS["format"],
+        STREAM_FORMAT,
         "--js-runtimes",
         "node",
         "--remote-components",
@@ -136,7 +144,10 @@ class Music(commands.Cog):
             return subprocess.Popen(
                 ytdlp_stream_argv(song.webpage_url),
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                # Inherit stderr so extraction failures land in the container
+                # logs. Discarding it makes a silent pipe indistinguishable
+                # from a download that simply produced nothing.
+                stderr=None,
             )
 
         return await loop.run_in_executor(None, _spawn)
