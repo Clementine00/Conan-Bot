@@ -16,12 +16,20 @@ from discord.ext import commands
 # that is a sidecar container, so the URL is overridable per environment.
 POT_PROVIDER_URL = os.getenv("POT_PROVIDER_URL", "http://127.0.0.1:4416")
 
-# Which YouTube player client to extract with. The default, android_vr, never
-# requests a PO token, so YouTube answers its stream URLs with 403. web_safari
-# and tv are SABR-only and yt-dlp has no SABR downloader. mweb requests a GVS
-# token from the provider above and still serves plain HTTPS formats.
-# Overridable because YouTube changes which clients work fairly often.
-YOUTUBE_PLAYER_CLIENT = os.getenv("YOUTUBE_PLAYER_CLIENT", "mweb")
+# Which YouTube player client to extract with. This is the single most
+# breakage-prone setting in the bot, so it is overridable without a rebuild.
+#
+# The default, android_vr, never requests a PO token and its URLs answer 403.
+# mweb requests one but is refused on much licensed music. web_safari and tv are
+# SABR-only and yt-dlp has no SABR downloader. Measured across four videos with
+# the token provider running, android, tv_simply, web_embedded and web_music all
+# downloaded every one; mweb managed only one of the four.
+#
+# android wins the default because the other three are narrower: web_music is
+# music-specific and web_embedded/tv_simply are niche players. Listing several
+# clients does not give real failover - yt-dlp merges their formats but will not
+# retry another client's URL after a 403 - so prefer one that works broadly.
+YOUTUBE_PLAYER_CLIENT = os.getenv("YOUTUBE_PLAYER_CLIENT", "android")
 _PLAYER_CLIENTS = [c.strip() for c in YOUTUBE_PLAYER_CLIENT.split(",") if c.strip()]
 
 YDL_OPTIONS = {

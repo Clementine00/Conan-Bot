@@ -169,11 +169,27 @@ is either a 403 or "Requested format is not available".
 `bgutil-provider` sidecar that mints those tokens. The bot finds it via
 `POT_PROVIDER_URL`, which compose sets to `http://bgutil-provider:4416`.
 
-A token alone is not enough - the player client has to be one that actually
-requests it. yt-dlp's default, `android_vr`, never asks for a token, so it wins
-client selection and hands back URLs that 403. `web_safari` and `tv` are
-SABR-only and yt-dlp has no SABR downloader. `mweb` requests a GVS token and
-still serves plain HTTPS formats, so the bot pins it via `YOUTUBE_PLAYER_CLIENT`.
+A token alone is not enough - the player client has to be one that both requests
+it and is actually served. yt-dlp's default, `android_vr`, never asks for a
+token, so it wins client selection and hands back URLs that 403. `web_safari`
+and `tv` are SABR-only and yt-dlp has no SABR downloader. The bot pins a working
+client via `YOUTUBE_PLAYER_CLIENT`.
+
+Measured across four videos with the provider running:
+
+| client | result |
+| --- | --- |
+| `android` (default) | all four |
+| `tv_simply` | all four |
+| `web_embedded` | all four |
+| `web_music` | all four, but music-specific |
+| `mweb` | one of four |
+| `tv_downgraded` | "The page needs to be reloaded" |
+| `web_creator` | requires sign-in |
+
+Listing several clients does not give real failover: yt-dlp merges their formats
+but will not retry another client's URL after a 403. Prefer one that works
+broadly over a list.
 
 If YouTube shifts again, try other clients without rebuilding by setting that
 variable (comma-separated, tried in order) on the `bot` service in
