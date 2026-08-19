@@ -1,6 +1,6 @@
 # Discord Music Bot
 
-A Discord music bot built with [discord.py](https://discordpy.readthedocs.io/) and
+A  private use Discord music bot built with [discord.py](https://discordpy.readthedocs.io/) and
 [yt-dlp](https://github.com/yt-dlp/yt-dlp). Streams audio from YouTube into a voice
 channel with a per-guild queue.
 
